@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
+import book_to_skill.utils as utils
 from book_to_skill.exceptions import ExtractionError
 from book_to_skill.parsers.text import read_text_file
-from book_to_skill.utils import extract_single_file
 
 
 @pytest.mark.parametrize(
@@ -29,4 +29,4 @@ def test_malformed_bom_is_rejected_by_text_extractor(tmp_path: Path) -> None:
     path = tmp_path / "book.txt"
     path.write_bytes(b"\xff\xfeA")
     with pytest.raises(ExtractionError, match="Could not read text document"):
-        extract_single_file(path, "text", "no")
+        utils.extract_single_file(path, "text", "no")
