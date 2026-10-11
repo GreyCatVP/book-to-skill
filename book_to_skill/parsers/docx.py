@@ -8,18 +8,33 @@ from book_to_skill.exceptions import ExtractionError
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
-def _body_skips_sdt_text(document) -> bool:
-    """True when a top-level `<w:sdt>` holds text the block iterator drops.
+def top_level_sdt_holds_text(document_xml: bytes) -> bool:
+    """True when a direct body child `<w:sdt>` holds non-whitespace text.
 
-    `Document.iter_inner_content()` yields only the body's direct `<w:p>` and
-    `<w:tbl>` children. A content control (`<w:sdt>`) is neither, so its
-    paragraphs never reach the caller -- which matters most for a Word TOC,
-    often the document's only unit structure as text. An empty control costs
-    nothing, so only a control with non-whitespace text counts as a loss.
+    `Document.iter_inner_content()` yields only the body's direct `<w:p>` /
+    `<w:tbl>` children, so a content control is invisible to it. Detecting
+    that loss in the raw `word/document.xml` keeps the decision free of the
+    optional `python-docx` dependency (see #268 / #288).
     """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(document_xml)
+    except ET.ParseError:
+        return False
+    body = root.find(f"{_W_NS}body")
+    if body is None:
+        return False
+    for child in list(body):
+        if child.tag == f"{_W_NS}sdt" and "".join(child.itertext()).strip():
+            return True
+    return False
+
+
+def _body_skips_sdt_text(document) -> bool:
+    """python-docx mirror of `top_level_sdt_holds_text` for live Document objects."""
     body = getattr(getattr(document, "element", None), "body", None)
     if body is None or not hasattr(body, "iterchildren"):
-        # No enumerable body (a stub document, say): nothing observed was lost.
         return False
     try:
         children = list(body.iterchildren())
@@ -47,13 +62,12 @@ def extract_docx_with_python_docx(docx_path: str) -> str | None:
     try:
         import docx
         validate_docx_xml_safety(docx_path)
-        document = docx.Document(docx_path)
-        iter_inner_content = getattr(document, "iter_inner_content", None)
-        if not callable(iter_inner_content):
-            # Older python-docx releases lack the ordered block iterator. Let
-            # extract_docx() use its order-preserving stdlib fallback instead.
-            return None
-        if _body_skips_sdt_text(document):
+        # Decide on the raw XML first so the SDT loss check does not depend on
+        # python-docx's element tree (and so CI without that extra can still
+        # pin the decision).
+        with zipfile.ZipFile(docx_path) as zf:
+            document_xml = zf.read("word/document.xml")
+        if top_level_sdt_holds_text(document_xml):
             # iter_inner_content() walks the body's direct <w:p>/<w:tbl>
             # children, so a top-level <w:sdt> content control -- how Word
             # stores a generated TOC -- is silently skipped even when it
@@ -61,6 +75,12 @@ def extract_docx_with_python_docx(docx_path: str) -> str | None:
             # hands the file to the order-preserving stdlib fallback, which
             # reads the raw XML and keeps that text, rather than reporting a
             # clean run that quietly dropped it.
+            return None
+        document = docx.Document(docx_path)
+        iter_inner_content = getattr(document, "iter_inner_content", None)
+        if not callable(iter_inner_content):
+            # Older python-docx releases lack the ordered block iterator. Let
+            # extract_docx() use its order-preserving stdlib fallback instead.
             return None
         parts = []
         for block in iter_inner_content():
