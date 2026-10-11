@@ -1915,6 +1915,48 @@ class TestDocxTableReconstruction:
         assert method == "zipfile-docx"
         assert text == "Before\nX\nAfter"
 
+    def test_dispatcher_does_not_match_sdt_paragraph_inside_another_paragraph(self, tmp_path):
+        from book_to_skill.parsers import docx as docx_parser
+
+        body = (
+            self._para("Chapter 10")
+            + "<w:sdt><w:sdtContent>" + self._para("1") + "</w:sdtContent></w:sdt>"
+        )
+        docx_path = self._make_docx(tmp_path, body)
+        preferred = "Chapter 10\n" + "long ordinary paragraph " * 20
+        with mock.patch.object(
+            docx_parser,
+            "extract_docx_with_python_docx",
+            return_value=preferred,
+        ):
+            text, method = docx_parser.extract_docx(docx_path)
+
+        assert len(text) < len(preferred)
+        assert method == "zipfile-docx"
+        assert text == "Chapter 10\n1"
+
+    def test_dispatcher_counts_repeated_sdt_paragraphs(self, tmp_path):
+        from book_to_skill.parsers import docx as docx_parser
+
+        body = (
+            "<w:sdt><w:sdtContent>"
+            + self._para("Repeated")
+            + self._para("Repeated")
+            + "</w:sdtContent></w:sdt>"
+        )
+        docx_path = self._make_docx(tmp_path, body)
+        preferred = "Repeated\n" + "long ordinary paragraph " * 20
+        with mock.patch.object(
+            docx_parser,
+            "extract_docx_with_python_docx",
+            return_value=preferred,
+        ):
+            text, method = docx_parser.extract_docx(docx_path)
+
+        assert len(text) < len(preferred)
+        assert method == "zipfile-docx"
+        assert text == "Repeated\nRepeated"
+
     def test_dispatcher_keeps_preferred_when_fallback_adds_no_sdt_coverage(self, tmp_path):
         from book_to_skill.parsers import docx as docx_parser
 

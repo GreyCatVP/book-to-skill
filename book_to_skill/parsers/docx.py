@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import zipfile
 import sys
 from book_to_skill.exceptions import ExtractionError
@@ -143,23 +144,31 @@ def _docx_sdt_text_fragments(docx_path: str) -> list[str] | None:
         return None
 
     ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    fragments = {
-        text.strip()
-        for sdt in root.iter(f"{ns}sdt")
-        for content in sdt.iter(f"{ns}sdtContent")
-        for paragraph in content.iter(f"{ns}p")
-        if (text := _docx_inline_text(paragraph).strip())
-    }
-    return sorted(fragments)
+    fragments: list[str] = []
+    seen_paragraphs: set[int] = set()
+    for sdt in root.iter(f"{ns}sdt"):
+        for content in sdt.iter(f"{ns}sdtContent"):
+            for paragraph in content.iter(f"{ns}p"):
+                paragraph_id = id(paragraph)
+                if paragraph_id in seen_paragraphs:
+                    continue
+                seen_paragraphs.add(paragraph_id)
+                if text := _docx_inline_text(paragraph).strip():
+                    fragments.append(text)
+    return fragments
 
 
 def _sdt_coverage(text: str, fragments: list[str]) -> int:
-    """Score the amount of content-control paragraph text present in output."""
-    normalized_text = " ".join(text.split())
+    """Score matching normalized paragraph occurrences in parser output."""
+    output_paragraphs = Counter(
+        normalized
+        for line in text.splitlines()
+        if (normalized := " ".join(line.split()))
+    )
+    fragment_counts = Counter(" ".join(fragment.split()) for fragment in fragments)
     return sum(
-        len(fragment)
-        for fragment in fragments
-        if " ".join(fragment.split()) in normalized_text
+        len(fragment) * min(count, output_paragraphs[fragment])
+        for fragment, count in fragment_counts.items()
     )
 
 
