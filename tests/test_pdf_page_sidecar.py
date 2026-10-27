@@ -160,7 +160,3 @@ class PdfPageSidecarTests(unittest.TestCase):
         if result.returncode:
             raise AssertionError(result.stdout + result.stderr)
         return workdir
-
-
-if __name__ == "__main__":
-    unittest.main()
